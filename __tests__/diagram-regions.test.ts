@@ -105,7 +105,7 @@ describe("regions", () => {
     expect(internal.points.every((p) => inside({ ...p, width: 0, height: 0 }, box))).toBe(true);
   });
 
-  test("wires sharing a region get separate gates, not one shared point", async () => {
+  test("wires from different pins get separate gates, not one shared point", async () => {
     const many: Diagram = {
       ...diagram,
       components: [
@@ -140,6 +140,29 @@ describe("regions", () => {
     for (const region of layout.regions) {
       const g = region.gates[0];
       expect(points.some((p) => Math.abs(p.x - g.x) <= 1 && Math.abs(p.y - g.y) <= 1)).toBe(true);
+    }
+  });
+
+  test("wires leaving the same pin share one gate", async () => {
+    const shared: Diagram = {
+      ...diagram,
+      components: [
+        { id: "sensor-1", type: "hall_sensor", region: "device" },
+        { id: "mcu-1", type: "esp32" },
+        { id: "psu-1", type: "power_supply" },
+      ],
+      connections: [
+        { id: "a", from: { component: "sensor-1", pin: "OUT" }, to: { component: "mcu-1", pin: "D4" } },
+        { id: "b", from: { component: "sensor-1", pin: "OUT" }, to: { component: "mcu-1", pin: "D5" } },
+        { id: "c", from: { component: "sensor-1", pin: "GND" }, to: { component: "mcu-1", pin: "GND" } },
+      ],
+    };
+    const layout = await layoutDiagram(shared);
+    const gates = layout.regions[0].gates;
+    expect(gates).toHaveLength(2);
+    for (const id of ["a", "b"]) {
+      const points = layout.edges.find((e) => e.id === id)!.points;
+      expect(points.filter((p) => gates.some((g) => Math.abs(p.x - g.x) <= 1 && Math.abs(p.y - g.y) <= 1))).toHaveLength(1);
     }
   });
 });

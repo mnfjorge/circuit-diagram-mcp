@@ -73,7 +73,7 @@ export interface LayoutEdge {
   to: PinRef;
 }
 
-/** A point on a region's border where one wire crosses in or out of the region. */
+/** A point on a region's border where the wires of one pin cross in or out of the region. */
 export interface LayoutGate {
   side: PinSide;
   x: number;
@@ -473,8 +473,9 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     /** Region whose coordinate space ELK reports this hop's points in; undefined = root. */
     container?: string;
   }
-  // One gate per crossing wire (not per region side), so wires keep their own
-  // entry/exit point on the border instead of piling onto a shared one.
+  // One gate per pin (and side) that has wires crossing the region border:
+  // wires from the same pin - e.g. every consumer of a charger's OUT+ - share
+  // that pin's gate, while wires from different pins keep separate ones.
   const gateMeta = new Map<string, { region: string; side: PinSide }>();
   const hopsByConnection = new Map<string, Hop[]>();
   const connectionById = new Map(diagram.connections.map((connection, index) => [connectionId(connection, index), connection]));
@@ -487,17 +488,17 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     const toRegion = regionOf.get(toComp);
 
     const pin = (ref: PinRef): Waypoint => ({ kind: "pin", id: pinId(ref.component, ref.pin), component: ref.component });
-    const gateFor = (region: string, own: string, other: string): Waypoint => {
+    const gateFor = (region: string, own: string, ownPin: string, other: string): Waypoint => {
       const anchors = anchorsFor(ctx, own, other);
       const side: PinSide = anchors && anchors.other < anchors.own ? "WEST" : "EAST";
-      const gate = `gate::${id}::${region}`;
+      const gate = `gate::${region}::${own}::${ownPin}::${side}`;
       gateMeta.set(gate, { region, side });
       return { kind: "gate", id: gate, region };
     };
 
     const path: Waypoint[] = [pin(connection.from)];
-    if (fromRegion !== undefined && fromRegion !== toRegion) path.push(gateFor(fromRegion, fromComp, toComp));
-    if (toRegion !== undefined && fromRegion !== toRegion) path.push(gateFor(toRegion, toComp, fromComp));
+    if (fromRegion !== undefined && fromRegion !== toRegion) path.push(gateFor(fromRegion, fromComp, connection.from.pin, toComp));
+    if (toRegion !== undefined && fromRegion !== toRegion) path.push(gateFor(toRegion, toComp, connection.to.pin, fromComp));
     path.push(pin(connection.to));
 
     const hops: Hop[] = [];
