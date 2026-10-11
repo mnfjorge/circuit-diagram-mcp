@@ -97,7 +97,10 @@ async function uploadBlob(pathname: string, data: Buffer, options?: UploadOption
 }
 
 async function downloadBlob(pathname: string): Promise<Buffer> {
-  const result = await get(pathname, { access: getBlobAccess() });
+  // useCache: false reads the latest bytes from origin storage. With the default (CDN-cached,
+  // up to a month) a file we just overwrote - e.g. a diagram's JSON after update_diagram - can
+  // keep being served in its old form, so the next render would draw stale content.
+  const result = await get(pathname, { access: getBlobAccess(), useCache: false });
   if (!result || result.statusCode !== 200) {
     throw new Error(`File not found: ${pathname}`);
   }

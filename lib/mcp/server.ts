@@ -1,6 +1,21 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createDiagram, listComponentTypes, renderDiagram, updateDiagram, type DiagramInput } from "./tools";
-import { createDiagramTool, listComponentTypesTool, renderDiagramTool, updateDiagramTool } from "./tool-definitions";
+import {
+  createDiagram,
+  deleteStoredDiagram,
+  getStoredDiagram,
+  listComponentTypes,
+  renderDiagram,
+  updateDiagram,
+  type DiagramInput,
+} from "./tools";
+import {
+  createDiagramTool,
+  deleteDiagramTool,
+  getDiagramTool,
+  listComponentTypesTool,
+  renderDiagramTool,
+  updateDiagramTool,
+} from "./tool-definitions";
 
 function errorResult(errors: string[]) {
   return {
@@ -9,16 +24,22 @@ function errorResult(errors: string[]) {
   };
 }
 
-function diagramSummary(action: string, diagram: DiagramInput) {
+function diagramSummary(action: string, diagram: DiagramInput, warnings: string[]) {
+  const regionCount = diagram.regions?.length ?? 0;
+  const warningText = warnings.length > 0 ? `\nWarnings:\n${warnings.map((w) => `- ${w}`).join("\n")}` : "";
   return {
     content: [
       {
         type: "text" as const,
-        text: `${action} diagram "${diagram.diagramId}" with ${diagram.components.length} component(s) and ${diagram.connections.length} connection(s). Call render_diagram to generate an image.`,
+        text:
+          `${action} diagram "${diagram.diagramId}" with ${diagram.components.length} component(s), ` +
+          `${diagram.connections.length} connection(s) and ${regionCount} region(s). Call render_diagram to generate an image.${warningText}`,
       },
     ],
     structuredContent: {
       diagramId: diagram.diagramId,
+      regionCount,
+      warnings,
       componentCount: diagram.components.length,
       connectionCount: diagram.connections.length,
     },
@@ -40,11 +61,11 @@ export function createDiagramMcpServer(): McpServer {
     {
       title: createDiagramTool.title,
       description: createDiagramTool.description,
-      inputSchema: createDiagramTool.inputShape,
+      inputSchema: createDiagramTool.inputSchema,
     },
     async (input) => {
       const result = await createDiagram(input);
-      return result.ok ? diagramSummary("Created", input) : errorResult(result.errors);
+      return result.ok ? diagramSummary("Created", input, result.warnings) : errorResult(result.errors);
     },
   );
 
@@ -53,11 +74,11 @@ export function createDiagramMcpServer(): McpServer {
     {
       title: updateDiagramTool.title,
       description: updateDiagramTool.description,
-      inputSchema: updateDiagramTool.inputShape,
+      inputSchema: updateDiagramTool.inputSchema,
     },
     async (input) => {
       const result = await updateDiagram(input);
-      return result.ok ? diagramSummary("Updated", input) : errorResult(result.errors);
+      return result.ok ? diagramSummary("Updated", input, result.warnings) : errorResult(result.errors);
     },
   );
 
@@ -93,6 +114,43 @@ export function createDiagramMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(types, null, 2) }],
         structuredContent: { componentTypes: types },
+      };
+    },
+  );
+
+  server.registerTool(
+    getDiagramTool.name,
+    {
+      title: getDiagramTool.title,
+      description: getDiagramTool.description,
+      inputSchema: getDiagramTool.inputShape,
+    },
+    async ({ diagramId }) => {
+      const result = await getStoredDiagram(diagramId);
+      if (!result.ok) return errorResult(result.errors);
+
+      const { id, ...rest } = result.diagram;
+      const stored = { diagramId: id, ...rest };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(stored, null, 2) }],
+        structuredContent: stored,
+      };
+    },
+  );
+
+  server.registerTool(
+    deleteDiagramTool.name,
+    {
+      title: deleteDiagramTool.title,
+      description: deleteDiagramTool.description,
+      inputSchema: deleteDiagramTool.inputShape,
+    },
+    async ({ diagramId }) => {
+      const result = await deleteStoredDiagram(diagramId);
+      if (!result.ok) return errorResult(result.errors);
+      return {
+        content: [{ type: "text" as const, text: `Deleted diagram "${diagramId}" and its rendered image.` }],
+        structuredContent: { diagramId, deleted: true },
       };
     },
   );
