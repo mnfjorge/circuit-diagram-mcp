@@ -79,12 +79,14 @@ describe("regions", () => {
     expect(svg).toContain("stroke-dasharray");
   });
 
-  test("each region exposes at most one input (west) and one output (east) gate, and wires cross through them", async () => {
+  test("each wire crossing a region border gets its own gate on the border", async () => {
     const layout = await layoutDiagram(diagram);
     const box = layout.regions[0];
-    // psu-1 is outside, so its wire into the region enters through a single gate.
-    expect(box.gates.length).toBeGreaterThanOrEqual(1);
-    expect(new Set(box.gates.map((g) => g.side)).size).toBe(box.gates.length);
+    // Only c2 (psu-1 -> mcu-1) crosses; c1 is internal.
+    expect(box.gates).toHaveLength(1);
+    const onBorder = (g: { x: number; y: number }) =>
+      Math.abs(g.x - box.x) <= 1 || Math.abs(g.x - (box.x + box.width)) <= 1;
+    expect(box.gates.every(onBorder)).toBe(true);
 
     const crossing = layout.edges.find((e) => e.id === "c2")!;
     expect(
@@ -101,6 +103,26 @@ describe("regions", () => {
     // Wires fully inside the region never need a gate.
     const internal = layout.edges.find((e) => e.id === "c1")!;
     expect(internal.points.every((p) => inside({ ...p, width: 0, height: 0 }, box))).toBe(true);
+  });
+
+  test("wires sharing a region get separate gates, not one shared point", async () => {
+    const many: Diagram = {
+      ...diagram,
+      components: [
+        { id: "sensor-1", type: "hall_sensor", region: "device" },
+        { id: "mcu-1", type: "esp32" },
+        { id: "psu-1", type: "power_supply" },
+      ],
+      connections: [
+        { id: "a", from: { component: "sensor-1", pin: "OUT" }, to: { component: "mcu-1", pin: "D4" } },
+        { id: "b", from: { component: "sensor-1", pin: "VCC" }, to: { component: "mcu-1", pin: "3V3" } },
+        { id: "c", from: { component: "sensor-1", pin: "GND" }, to: { component: "mcu-1", pin: "GND" } },
+      ],
+    };
+    const layout = await layoutDiagram(many);
+    const gates = layout.regions[0].gates;
+    expect(gates).toHaveLength(3);
+    expect(new Set(gates.map((g) => `${Math.round(g.x)},${Math.round(g.y)}`)).size).toBe(3);
   });
 
   test("wires between two regions go through a gate on each", async () => {

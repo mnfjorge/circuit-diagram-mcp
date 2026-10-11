@@ -42,6 +42,8 @@ const REGION_PADDING_TOP = 44;
 const REGION_PADDING_SIDE = 28;
 const REGION_PADDING_BOTTOM = 28;
 const REGION_ID_PREFIX = "region:";
+// Minimum gap between two gates on the same region side.
+const GATE_SPACING = 20;
 
 export type PinSide = "WEST" | "EAST";
 
@@ -71,7 +73,7 @@ export interface LayoutEdge {
   to: PinRef;
 }
 
-/** A point on a region's border that every wire crossing in/out of the region passes through. */
+/** A point on a region's border where one wire crosses in or out of the region. */
 export interface LayoutGate {
   side: PinSide;
   x: number;
@@ -160,6 +162,9 @@ function groupByRegion(diagram: Diagram, componentNodes: ElkNode[], gatePorts: M
       ports: gatePorts.get(region.id) ?? [],
       layoutOptions: {
         "elk.portConstraints": "FIXED_SIDE",
+        // Keeps neighbouring gates (one per crossing wire) visibly apart.
+        "elk.spacing.portPort": String(GATE_SPACING),
+        "elk.spacing.portsSurrounding": `[top=${GATE_SPACING},left=0,bottom=${GATE_SPACING},right=0]`,
         "elk.algorithm": "layered",
         "elk.direction": "RIGHT",
         "elk.padding": `[top=${REGION_PADDING_TOP},left=${REGION_PADDING_SIDE},bottom=${REGION_PADDING_BOTTOM},right=${REGION_PADDING_SIDE}]`,
@@ -468,8 +473,9 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     /** Region whose coordinate space ELK reports this hop's points in; undefined = root. */
     container?: string;
   }
-  const gateSides = new Map<string, Set<PinSide>>();
-  const gateId = (region: string, side: PinSide) => `gate::${region}::${side}`;
+  // One gate per crossing wire (not per region side), so wires keep their own
+  // entry/exit point on the border instead of piling onto a shared one.
+  const gateMeta = new Map<string, { region: string; side: PinSide }>();
   const hopsByConnection = new Map<string, Hop[]>();
   const connectionById = new Map(diagram.connections.map((connection, index) => [connectionId(connection, index), connection]));
 
@@ -484,8 +490,9 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     const gateFor = (region: string, own: string, other: string): Waypoint => {
       const anchors = anchorsFor(ctx, own, other);
       const side: PinSide = anchors && anchors.other < anchors.own ? "WEST" : "EAST";
-      gateSides.set(region, (gateSides.get(region) ?? new Set()).add(side));
-      return { kind: "gate", id: gateId(region, side), region };
+      const gate = `gate::${id}::${region}`;
+      gateMeta.set(gate, { region, side });
+      return { kind: "gate", id: gate, region };
     };
 
     const path: Waypoint[] = [pin(connection.from)];
@@ -507,16 +514,11 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
   });
 
   const gatePorts = new Map<string, ElkPort[]>();
-  for (const [region, sides] of gateSides) {
-    gatePorts.set(
-      region,
-      [...sides].map((side) => ({
-        id: gateId(region, side),
-        width: 1,
-        height: 1,
-        layoutOptions: { "elk.port.side": side },
-      })),
-    );
+  for (const [id, { region, side }] of gateMeta) {
+    gatePorts.set(region, [
+      ...(gatePorts.get(region) ?? []),
+      { id, width: 1, height: 1, layoutOptions: { "elk.port.side": side } },
+    ]);
   }
 
   const elkEdges: ElkExtendedEdge[] = [...hopsByConnection.values()].flatMap((hops) =>
@@ -632,7 +634,7 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     const box = flat.regions.get(region.id);
     if (!box) return [];
     const gates: LayoutGate[] = box.ports.map((port) => {
-      const side: PinSide = port.id.endsWith("::WEST") ? "WEST" : "EAST";
+      const side: PinSide = gateMeta.get(port.id)?.side ?? "EAST";
       return { side, x: box.x + (port.x ?? 0), y: box.y + (port.y ?? 0) };
     });
     return [{ id: region.id, label: region.label, kind: region.kind ?? "physical", gates, x: box.x, y: box.y, width: box.width, height: box.height }];
