@@ -151,7 +151,7 @@ export function ConnectionsTable({ diagramId, rows }: ConnectionsTableProps) {
                 const groupCompletedCount = group.rows.filter((row) => completed[row.connectionId]).length;
                 return (
                   <Fragment key={group.component}>
-                    <tr className="border-b border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60">
+                    <tr className="border-b border-zinc-200 bg-zinc-200 dark:border-zinc-800 dark:bg-zinc-800">
                       <td colSpan={5} className="px-2 py-1.5 print:py-0.5">
                         <button
                           type="button"
@@ -172,15 +172,23 @@ export function ConnectionsTable({ diagramId, rows }: ConnectionsTableProps) {
                         </button>
                       </td>
                     </tr>
-                    {group.rows.map((row) => {
+                    {group.rows.map((row, rowIndex) => {
                       const isCompleted = completed[row.connectionId] ?? false;
                       return (
                         <tr
                           key={row.key}
+                          // Zebra stripes restart under each component header; see globals.css for print.
+                          data-stripe={rowIndex % 2 === 1 ? "odd" : undefined}
                           // Collapsing is a screen-only convenience; a printout lists every row.
                           className={`border-b border-zinc-200 last:border-0 dark:border-zinc-800 ${
                             isCollapsed ? "hidden print:table-row" : ""
-                          } ${isCompleted ? "bg-emerald-50/60 dark:bg-emerald-950/20" : ""}`}
+                          } ${
+                            isCompleted
+                              ? "bg-emerald-50/60 dark:bg-emerald-950/20"
+                              : rowIndex % 2 === 1
+                                ? "bg-zinc-100 dark:bg-zinc-900/70"
+                                : "bg-white dark:bg-transparent"
+                          }`}
                         >
                           <td className="px-4 py-2 print:py-0.5">
                             <input

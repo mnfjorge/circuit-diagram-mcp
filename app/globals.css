@@ -52,6 +52,14 @@ body {
     box-shadow: none !important;
   }
 
+  /* The blanket reset above would drop the table's zebra stripes; keep them
+     (and make the browser actually print the background). */
+  tr[data-stripe="odd"] {
+    background: #f3f4f6 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
   tr,
   img {
     break-inside: avoid;
