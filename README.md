@@ -56,7 +56,7 @@ A Blob store is provisioned as either public or private, and reads/writes must d
 - `update_diagram` — replaces an existing diagram's components/connections. Fails if the id doesn't exist yet.
 - `render_diagram` — lays out the diagram (via [elkjs](https://github.com/kieler/elkjs), orthogonal routing) and renders it to JPEG, returning the image inline plus a public `/view/{diagramId}` URL.
 
-Diagrams can optionally declare `regions` (`id`, `label`, optional `kind`: `physical` (solid border, default) or `virtual` (dashed border)) and assign components to them via a component's `region` field. Each region is drawn as a labelled box around its components, which makes it easy to separate physical hardware from virtual/software parts; wires can freely cross region boundaries.
+Diagrams can optionally declare `regions` (`id`, `label`, optional `kind`: `physical` (solid border, default) or `virtual` (dashed border)) and assign components to them via a component's `region` field. Each region is drawn as a labelled box around its components, which makes it easy to separate physical hardware from virtual/software parts; every wire crossing a region's border passes through one of its two gates (a west "input" and an east "output" point, drawn as white dots), so connections between a region and the outside route to those points rather than to each component individually.
 
 Component placement and canvas size are computed automatically — the diagram JSON only describes structure (see `schema/diagram.schema.json`), not layout.
 

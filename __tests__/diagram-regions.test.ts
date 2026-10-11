@@ -78,4 +78,46 @@ describe("regions", () => {
     expect(svg).toContain("Cloud &lt;app&gt;");
     expect(svg).toContain("stroke-dasharray");
   });
+
+  test("each region exposes at most one input (west) and one output (east) gate, and wires cross through them", async () => {
+    const layout = await layoutDiagram(diagram);
+    const box = layout.regions[0];
+    // psu-1 is outside, so its wire into the region enters through a single gate.
+    expect(box.gates.length).toBeGreaterThanOrEqual(1);
+    expect(new Set(box.gates.map((g) => g.side)).size).toBe(box.gates.length);
+
+    const crossing = layout.edges.find((e) => e.id === "c2")!;
+    expect(
+      crossing.points.some((p) => box.gates.some((g) => Math.abs(p.x - g.x) <= 1 && Math.abs(p.y - g.y) <= 1)),
+    ).toBe(true);
+
+    // The wire is orthogonal throughout, including across the stitched hops.
+    for (let i = 1; i < crossing.points.length; i++) {
+      const a = crossing.points[i - 1];
+      const b = crossing.points[i];
+      expect(Math.abs(a.x - b.x) <= 1 || Math.abs(a.y - b.y) <= 1).toBe(true);
+    }
+
+    // Wires fully inside the region never need a gate.
+    const internal = layout.edges.find((e) => e.id === "c1")!;
+    expect(internal.points.every((p) => inside({ ...p, width: 0, height: 0 }, box))).toBe(true);
+  });
+
+  test("wires between two regions go through a gate on each", async () => {
+    const two: Diagram = {
+      ...diagram,
+      components: [
+        { id: "sensor-1", type: "hall_sensor", region: "device" },
+        { id: "mcu-1", type: "esp32", region: "cloud" },
+      ],
+      connections: [{ id: "c1", from: { component: "sensor-1", pin: "OUT" }, to: { component: "mcu-1", pin: "D4" } }],
+    };
+    const layout = await layoutDiagram(two);
+    expect(layout.regions.every((r) => r.gates.length === 1)).toBe(true);
+    const points = layout.edges[0].points;
+    for (const region of layout.regions) {
+      const g = region.gates[0];
+      expect(points.some((p) => Math.abs(p.x - g.x) <= 1 && Math.abs(p.y - g.y) <= 1)).toBe(true);
+    }
+  });
 });

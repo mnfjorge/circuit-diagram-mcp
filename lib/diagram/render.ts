@@ -38,6 +38,14 @@ function renderRegion(region: LayoutRegion): string {
   ].join("\n");
 }
 
+/** Drawn after the wires so the gate dots sit on top of where wires cross a region's border. */
+function renderRegionGates(region: LayoutRegion): string {
+  const stroke = region.kind === "virtual" ? "#7c5cbf" : "#3e6fa8";
+  return region.gates
+    .map((gate) => `<circle cx="${gate.x}" cy="${gate.y}" r="5" fill="#ffffff" stroke="${stroke}" stroke-width="2" />`)
+    .join("\n");
+}
+
 function renderNode(node: LayoutNode): string {
   const parts: string[] = [
     `<rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="8" fill="#ffffff" stroke="${INK}" stroke-width="2" />`,
@@ -90,6 +98,9 @@ export function diagramToSvg(diagram: Diagram, layout: DiagramLayout): string {
   }
   for (const edge of layout.edges) {
     body.push(renderEdge(edge));
+  }
+  for (const region of layout.regions) {
+    body.push(renderRegionGates(region));
   }
   for (const node of layout.nodes) {
     body.push(renderNode(node));

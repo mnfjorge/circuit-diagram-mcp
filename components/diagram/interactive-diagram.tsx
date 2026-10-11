@@ -197,6 +197,19 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
                 </g>
               );
             })}
+            {layout.regions.flatMap((region) =>
+              region.gates.map((gate) => (
+                <circle
+                  key={`${region.id}:${gate.side}`}
+                  cx={gate.x}
+                  cy={gate.y}
+                  r={5}
+                  strokeWidth={2}
+                  className={region.kind === "virtual" ? "fill-white stroke-violet-500" : "fill-white stroke-blue-500"}
+                  style={{ pointerEvents: "none" }}
+                />
+              )),
+            )}
           </svg>
         </ViewportPortal>
       </ReactFlow>
