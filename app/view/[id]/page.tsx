@@ -2,6 +2,7 @@ import { cache } from "react";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ConnectionsTable, type ConnectionRow } from "@/components/diagram/connections-table";
+import { JsonSource } from "@/components/diagram/json-source";
 import { InteractiveDiagram } from "@/components/diagram/interactive-diagram";
 import { getComponentDefinition, type ComponentDefinition } from "@/lib/components/registry";
 import { layoutDiagram } from "@/lib/diagram/layout";
@@ -77,14 +78,14 @@ export default async function ViewDiagramPage({ params }: PageProps<"/view/[id]"
 
   return (
     <div className="min-h-full bg-background text-foreground">
-      <main className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-16">
+      <main className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-16 print:max-w-none print:gap-5 print:p-0">
         <header>
           <h1 className="text-2xl font-semibold tracking-tight">{diagram.title || "Untitled diagram"}</h1>
-          <p className="mt-1 font-mono text-sm text-zinc-500">{id}</p>
+          <p className="mt-1 font-mono text-sm text-zinc-500 print:hidden">{id}</p>
         </header>
 
         <section>
-          <div className="mb-2 flex items-center justify-between gap-4">
+          <div className="mb-2 flex items-center justify-between gap-4 print:hidden">
             <p className="text-sm text-zinc-500">
               Hover a component, pin, or wire for details. Scroll to zoom, drag to pan.
             </p>
@@ -100,7 +101,17 @@ export default async function ViewDiagramPage({ params }: PageProps<"/view/[id]"
               View static image
             </a>
           </div>
-          <InteractiveDiagram diagram={diagram} layout={layout} componentDefinitions={componentDefinitions} />
+          <div className="print:hidden">
+            <InteractiveDiagram diagram={diagram} layout={layout} componentDefinitions={componentDefinitions} />
+          </div>
+          {/* The interactive canvas can't print (it's a pannable viewport), so print shows the
+              static render instead. Hidden on screen but still fetched up front. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/view/${id}/image`}
+            alt={diagram.title || "Wiring diagram"}
+            className="hidden w-full print:block"
+          />
         </section>
 
         <section>
@@ -108,11 +119,8 @@ export default async function ViewDiagramPage({ params }: PageProps<"/view/[id]"
           <ConnectionsTable diagramId={id} rows={connectionRows} />
         </section>
 
-        <section>
-          <h2 className="text-lg font-semibold">JSON source</h2>
-          <pre className="mt-3 overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <code className="font-mono">{json}</code>
-          </pre>
+        <section className="print:hidden">
+          <JsonSource json={json} />
         </section>
       </main>
     </div>

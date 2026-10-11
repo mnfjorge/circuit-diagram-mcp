@@ -30,3 +30,39 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Printing: always black-on-white regardless of the viewer's color scheme (the
+   dark theme's light text would otherwise print near-invisibly), and keep rows
+   and headings from splitting across pages. */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    color: #111111 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  tr,
+  img {
+    break-inside: avoid;
+  }
+
+  h1,
+  h2 {
+    break-after: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+}
