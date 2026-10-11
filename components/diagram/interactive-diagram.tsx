@@ -198,9 +198,9 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
               );
             })}
             {layout.regions.flatMap((region) =>
-              region.gates.map((gate) => (
+              region.gates.map((gate, index) => (
                 <circle
-                  key={`${region.id}:${gate.side}`}
+                  key={`${region.id}:${index}`}
                   cx={gate.x}
                   cy={gate.y}
                   r={5}
