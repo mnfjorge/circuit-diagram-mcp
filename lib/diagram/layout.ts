@@ -1,7 +1,7 @@
 import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk.bundled.js";
 import type { ComponentPin } from "../components/registry";
 import { collectEphemeralDefinitions, resolveDefinition } from "./definitions";
-import type { Diagram, DiagramConnection, PinRef } from "./types";
+import type { Diagram, DiagramConnection, PinRef, RegionKind } from "./types";
 
 const PIN_SPACING = 24;
 const NODE_PADDING = 16;
@@ -36,6 +36,13 @@ const WIRE_EXIT_CLEARANCE = 16;
 // their own lane - only the sliver right at the port moved.
 const WIRE_LANE_GAP = 4;
 
+// Room a region's box reserves around its components. The top is larger to
+// fit the region's title.
+const REGION_PADDING_TOP = 44;
+const REGION_PADDING_SIDE = 28;
+const REGION_PADDING_BOTTOM = 28;
+const REGION_ID_PREFIX = "region:";
+
 export type PinSide = "WEST" | "EAST";
 
 export interface LayoutPin {
@@ -64,9 +71,20 @@ export interface LayoutEdge {
   to: PinRef;
 }
 
+export interface LayoutRegion {
+  id: string;
+  label: string;
+  kind: RegionKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface DiagramLayout {
   width: number;
   height: number;
+  regions: LayoutRegion[];
   nodes: LayoutNode[];
   edges: LayoutEdge[];
 }
@@ -99,6 +117,78 @@ function nodeHeight(westCount: number, eastCount: number): number {
 function pinLabelReach(pins: ComponentPin[]): number {
   const widest = pins.reduce((max, pin) => Math.max(max, pin.name.length * PIN_LABEL_CHAR_PX), 0);
   return widest === 0 ? 0 : PIN_LABEL_GAP + widest + PIN_LABEL_CLEARANCE;
+}
+
+/**
+ * Nests component nodes inside one ELK compound node per region (components
+ * without a region, or pointing at an unknown one, stay at the top level).
+ * Empty regions are dropped. Shared by both layout passes so region
+ * membership affects where components land in each.
+ */
+function groupByRegion(diagram: Diagram, componentNodes: ElkNode[]): ElkNode[] {
+  const regions = diagram.regions ?? [];
+  if (regions.length === 0) return componentNodes;
+
+  const regionById = new Map(regions.map((region) => [region.id, region]));
+  const componentRegion = new Map(diagram.components.map((component) => [component.id, component.region]));
+  const members = new Map<string, ElkNode[]>();
+  const result: ElkNode[] = [];
+
+  for (const node of componentNodes) {
+    const regionId = componentRegion.get(node.id);
+    if (regionId !== undefined && regionById.has(regionId)) {
+      members.set(regionId, [...(members.get(regionId) ?? []), node]);
+    } else {
+      result.push(node);
+    }
+  }
+
+  for (const region of regions) {
+    const children = members.get(region.id);
+    if (!children) continue;
+    result.push({
+      id: `${REGION_ID_PREFIX}${region.id}`,
+      children,
+      layoutOptions: {
+        "elk.algorithm": "layered",
+        "elk.direction": "RIGHT",
+        "elk.padding": `[top=${REGION_PADDING_TOP},left=${REGION_PADDING_SIDE},bottom=${REGION_PADDING_BOTTOM},right=${REGION_PADDING_SIDE}]`,
+      },
+    });
+  }
+  return result;
+}
+
+/**
+ * Walks ELK's nested result, returning every component node with its
+ * coordinates made absolute (ELK reports children relative to their parent)
+ * plus the absolute box of each region.
+ */
+function flattenResult(
+  children: ElkNode[] | undefined,
+  offsetX = 0,
+  offsetY = 0,
+  out: { components: ElkNode[]; regions: Map<string, { x: number; y: number; width: number; height: number }> } = {
+    components: [],
+    regions: new Map(),
+  },
+) {
+  for (const node of children ?? []) {
+    const x = (node.x ?? 0) + offsetX;
+    const y = (node.y ?? 0) + offsetY;
+    if (node.id.startsWith(REGION_ID_PREFIX)) {
+      out.regions.set(node.id.slice(REGION_ID_PREFIX.length), {
+        x,
+        y,
+        width: node.width ?? 0,
+        height: node.height ?? 0,
+      });
+      flattenResult(node.children, x, y, out);
+    } else {
+      out.components.push({ ...node, x, y });
+    }
+  }
+  return out;
 }
 
 /**
@@ -137,13 +227,14 @@ async function estimateComponentCenters(diagram: Diagram): Promise<Map<string, n
   const graph: ElkNode = {
     id: "root",
     layoutOptions: { "elk.algorithm": "layered", "elk.direction": "RIGHT" },
-    children: nodes,
+    children: groupByRegion(diagram, nodes),
     edges,
   };
+  graph.layoutOptions = { ...graph.layoutOptions, "elk.hierarchyHandling": "INCLUDE_CHILDREN" };
 
   const result = await elk.layout(graph);
   const centers = new Map<string, number>();
-  for (const node of result.children ?? []) {
+  for (const node of flattenResult(result.children).components) {
     centers.set(node.id, (node.x ?? 0) + (node.width ?? 0) / 2);
   }
   return centers;
@@ -329,14 +420,20 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
       "elk.layered.spacing.nodeNodeBetweenLayers": "120",
       "elk.spacing.edgeEdge": "12",
       "elk.spacing.edgeNode": "20",
+      // Lets wires cross region boundaries and be routed together with the
+      // rest of the graph instead of each region being laid out in isolation.
+      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
     },
-    children: elkNodes,
+    children: groupByRegion(diagram, elkNodes),
     edges: elkEdges,
   };
 
   const result = await elk.layout(graph);
 
-  const nodes: LayoutNode[] = (result.children ?? []).map((node) => {
+  const flat = flattenResult(result.children);
+  const regionOfComponent = new Map(diagram.components.map((component) => [component.id, component.region]));
+
+  const nodes: LayoutNode[] = flat.components.map((node) => {
     const component = diagram.components.find((c) => c.id === node.id);
     if (!component) {
       throw new Error(`Layout produced an unexpected node id "${node.id}"`);
@@ -379,14 +476,25 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
   });
 
   const edges: LayoutEdge[] = (result.edges ?? []).map((edge) => {
-    const points: { x: number; y: number }[] = [];
-    for (const section of edge.sections ?? []) {
-      points.push(section.startPoint, ...(section.bendPoints ?? []), section.endPoint);
-    }
     const id = edge.id ?? "edge";
     const connection = connectionById.get(id);
     if (!connection) {
       throw new Error(`Layout produced an unexpected edge id "${id}"`);
+    }
+    // ELK reports an edge's points relative to the lowest common ancestor of
+    // its endpoints. Regions nest one level deep, so that's the shared
+    // region when both ends sit in the same one, else the root (no offset).
+    const fromRegion = regionOfComponent.get(connection.from.component);
+    const sharedRegion = fromRegion !== undefined && fromRegion === regionOfComponent.get(connection.to.component)
+      ? flat.regions.get(fromRegion)
+      : undefined;
+    const offsetX = sharedRegion?.x ?? 0;
+    const offsetY = sharedRegion?.y ?? 0;
+    const points: { x: number; y: number }[] = [];
+    for (const section of edge.sections ?? []) {
+      for (const point of [section.startPoint, ...(section.bendPoints ?? []), section.endPoint]) {
+        points.push({ x: point.x + offsetX, y: point.y + offsetY });
+      }
     }
     const fromPinId = pinId(connection.from.component, connection.from.pin);
     const toPinId = pinId(connection.to.component, connection.to.pin);
@@ -402,9 +510,15 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     };
   });
 
+  const regions: LayoutRegion[] = (diagram.regions ?? []).flatMap((region) => {
+    const box = flat.regions.get(region.id);
+    return box ? [{ id: region.id, label: region.label, kind: region.kind ?? "physical", ...box }] : [];
+  });
+
   return {
     width: result.width ?? MIN_NODE_WIDTH,
     height: result.height ?? MIN_NODE_HEIGHT,
+    regions,
     nodes,
     edges,
   };

@@ -16,6 +16,11 @@
       "type": "string",
       "description": "Optional human-readable name for the diagram."
     },
+    "regions": {
+      "type": "array",
+      "description": "Optional named groups (e.g. a physical device vs. a virtual/cloud service). Components join one via their 'region' field; each region is drawn as a labelled box around its components.",
+      "items": { "$ref": "#/$defs/region" }
+    },
     "components": {
       "type": "array",
       "items": { "$ref": "#/$defs/component" }
@@ -26,6 +31,32 @@
     }
   },
   "$defs": {
+    "region": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for this region within the diagram, e.g. 'device'. Referenced by components' 'region' field."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display title drawn on the region's box, e.g. 'Physical device'."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["physical", "virtual"],
+          "description": "Styling hint: 'physical' (default) draws a solid border, 'virtual' a dashed one."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional free-text notes about what this region represents."
+        }
+      }
+    },
     "component": {
       "type": "object",
       "required": ["id", "type"],
@@ -43,6 +74,11 @@
         "label": {
           "type": "string",
           "description": "Optional display label override, e.g. 'X-axis endstop'."
+        },
+        "region": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional id of a region (see top-level 'regions') this component belongs to."
         },
         "definition": {
           "type": "object",

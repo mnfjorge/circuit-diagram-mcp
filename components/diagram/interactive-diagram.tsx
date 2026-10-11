@@ -144,6 +144,28 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
         <Background gap={20} />
         <Controls showInteractive={false} />
         <ViewportPortal>
+          {layout.regions.map((region) => {
+            const virtual = region.kind === "virtual";
+            return (
+              <div
+                key={region.id}
+                className={`pointer-events-none absolute rounded-xl border-2 ${
+                  virtual
+                    ? "border-dashed border-violet-500 bg-violet-500/5"
+                    : "border-blue-500 bg-blue-500/5"
+                }`}
+                style={{ left: region.x, top: region.y, width: region.width, height: region.height }}
+              >
+                <span
+                  className={`absolute left-4 top-2 text-sm font-bold ${
+                    virtual ? "text-violet-600 dark:text-violet-400" : "text-blue-600 dark:text-blue-400"
+                  }`}
+                >
+                  {region.label}
+                </span>
+              </div>
+            );
+          })}
           <svg style={{ position: "absolute", left: 0, top: 0, overflow: "visible" }}>
             {layout.edges.map((edge) => {
               const { kind, color } = classifyWire(edge);

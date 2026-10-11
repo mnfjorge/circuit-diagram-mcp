@@ -1,7 +1,7 @@
 import { Resvg } from "@resvg/resvg-js";
 import path from "node:path";
 import sharp from "sharp";
-import { layoutDiagram, type DiagramLayout, type LayoutEdge, type LayoutNode } from "./layout";
+import { layoutDiagram, type DiagramLayout, type LayoutEdge, type LayoutNode, type LayoutRegion } from "./layout";
 import type { Diagram } from "./types";
 import { edgeColor, GROUND_COLOR, POWER_COLOR, SIGNAL_COLORS } from "./wire-colors";
 
@@ -26,6 +26,16 @@ const FONT_FILES = ["Geist-Regular.ttf", "Geist-SemiBold.ttf", "Geist-Bold.ttf"]
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function renderRegion(region: LayoutRegion): string {
+  const virtual = region.kind === "virtual";
+  const stroke = virtual ? "#7c5cbf" : "#3e6fa8";
+  const fill = virtual ? "#f6f2fd" : "#eef4fb";
+  return [
+    `<rect x="${region.x}" y="${region.y}" width="${region.width}" height="${region.height}" rx="12" fill="${fill}" stroke="${stroke}" stroke-width="2"${virtual ? ' stroke-dasharray="8 5"' : ""} />`,
+    `<text x="${region.x + 16}" y="${region.y + 26}" font-family="${FONT_FAMILY}" font-size="14" font-weight="700" fill="${stroke}">${escapeXml(region.label)}</text>`,
+  ].join("\n");
 }
 
 function renderNode(node: LayoutNode): string {
@@ -75,6 +85,9 @@ export function diagramToSvg(diagram: Diagram, layout: DiagramLayout): string {
   }
 
   body.push(`<g transform="translate(${MARGIN}, ${MARGIN + titleHeight})">`);
+  for (const region of layout.regions) {
+    body.push(renderRegion(region));
+  }
   for (const edge of layout.edges) {
     body.push(renderEdge(edge));
   }
