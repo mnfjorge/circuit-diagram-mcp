@@ -1,13 +1,14 @@
 import { listComponentDefinitions } from "../components/registry";
 import { renderDiagramToJpeg } from "../diagram/render";
 import { getDiagram, saveDiagram, saveDiagramImage } from "../diagram/store";
-import type { Diagram, DiagramComponent, DiagramConnection } from "../diagram/types";
+import type { Diagram, DiagramComponent, DiagramConnection, DiagramRegion } from "../diagram/types";
 import { validateDiagram } from "../diagram/validate";
 import { getBaseUrl } from "../site-url";
 
 export interface DiagramInput {
   diagramId: string;
   title?: string;
+  regions?: DiagramRegion[];
   components: DiagramComponent[];
   connections: DiagramConnection[];
 }
@@ -20,6 +21,7 @@ function toDiagram(input: DiagramInput): Diagram {
   return {
     id: input.diagramId,
     title: input.title,
+    regions: input.regions,
     components: input.components,
     connections: input.connections,
   };

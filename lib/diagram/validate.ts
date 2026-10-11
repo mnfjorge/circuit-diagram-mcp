@@ -42,6 +42,14 @@ export function validateDiagram(data: unknown): ValidationResult {
   const diagram = data as Diagram;
   const errors: string[] = [];
   const componentIds = new Set<string>();
+  const regionIds = new Set<string>();
+
+  for (const region of diagram.regions ?? []) {
+    if (regionIds.has(region.id)) {
+      errors.push(`Duplicate region id "${region.id}"`);
+    }
+    regionIds.add(region.id);
+  }
   const componentById = new Map(diagram.components.map((c) => [c.id, c]));
 
   const ephemeral = collectEphemeralDefinitions(diagram);
@@ -52,6 +60,12 @@ export function validateDiagram(data: unknown): ValidationResult {
       errors.push(`Duplicate component id "${component.id}"`);
     }
     componentIds.add(component.id);
+
+    if (component.region !== undefined && !regionIds.has(component.region)) {
+      errors.push(
+        `Component "${component.id}" references unknown region "${component.region}". Declare it in "regions" first.`,
+      );
+    }
 
     if (!resolveDefinition(component.type, ephemeral.definitions)) {
       errors.push(

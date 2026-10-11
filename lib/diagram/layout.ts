@@ -1,7 +1,7 @@
-import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk.bundled.js";
+import ELK, { type ElkExtendedEdge, type ElkNode, type ElkPort } from "elkjs/lib/elk.bundled.js";
 import type { ComponentPin } from "../components/registry";
 import { collectEphemeralDefinitions, resolveDefinition } from "./definitions";
-import type { Diagram, DiagramConnection, PinRef } from "./types";
+import type { Diagram, DiagramConnection, PinRef, RegionKind } from "./types";
 
 const PIN_SPACING = 24;
 const NODE_PADDING = 16;
@@ -36,6 +36,15 @@ const WIRE_EXIT_CLEARANCE = 16;
 // their own lane - only the sliver right at the port moved.
 const WIRE_LANE_GAP = 4;
 
+// Room a region's box reserves around its components. The top is larger to
+// fit the region's title.
+const REGION_PADDING_TOP = 44;
+const REGION_PADDING_SIDE = 28;
+const REGION_PADDING_BOTTOM = 28;
+const REGION_ID_PREFIX = "region:";
+// Minimum gap between two gates on the same region side.
+const GATE_SPACING = 20;
+
 export type PinSide = "WEST" | "EAST";
 
 export interface LayoutPin {
@@ -64,9 +73,28 @@ export interface LayoutEdge {
   to: PinRef;
 }
 
+/** A point on a region's border where the wires of one pin cross in or out of the region. */
+export interface LayoutGate {
+  side: PinSide;
+  x: number;
+  y: number;
+}
+
+export interface LayoutRegion {
+  id: string;
+  label: string;
+  kind: RegionKind;
+  gates: LayoutGate[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface DiagramLayout {
   width: number;
   height: number;
+  regions: LayoutRegion[];
   nodes: LayoutNode[];
   edges: LayoutEdge[];
 }
@@ -102,13 +130,93 @@ function pinLabelReach(pins: ComponentPin[]): number {
 }
 
 /**
+ * Nests component nodes inside one ELK compound node per region (components
+ * without a region, or pointing at an unknown one, stay at the top level).
+ * Empty regions are dropped. Shared by both layout passes so region
+ * membership affects where components land in each.
+ */
+function groupByRegion(diagram: Diagram, componentNodes: ElkNode[], gatePorts: Map<string, ElkPort[]> = new Map()): ElkNode[] {
+  const regions = diagram.regions ?? [];
+  if (regions.length === 0) return componentNodes;
+
+  const regionById = new Map(regions.map((region) => [region.id, region]));
+  const componentRegion = new Map(diagram.components.map((component) => [component.id, component.region]));
+  const members = new Map<string, ElkNode[]>();
+  const result: ElkNode[] = [];
+
+  for (const node of componentNodes) {
+    const regionId = componentRegion.get(node.id);
+    if (regionId !== undefined && regionById.has(regionId)) {
+      members.set(regionId, [...(members.get(regionId) ?? []), node]);
+    } else {
+      result.push(node);
+    }
+  }
+
+  for (const region of regions) {
+    const children = members.get(region.id);
+    if (!children) continue;
+    result.push({
+      id: `${REGION_ID_PREFIX}${region.id}`,
+      children,
+      ports: gatePorts.get(region.id) ?? [],
+      layoutOptions: {
+        "elk.portConstraints": "FIXED_SIDE",
+        // Keeps neighbouring gates (one per crossing wire) visibly apart.
+        "elk.spacing.portPort": String(GATE_SPACING),
+        "elk.spacing.portsSurrounding": `[top=${GATE_SPACING},left=0,bottom=${GATE_SPACING},right=0]`,
+        "elk.algorithm": "layered",
+        "elk.direction": "RIGHT",
+        "elk.padding": `[top=${REGION_PADDING_TOP},left=${REGION_PADDING_SIDE},bottom=${REGION_PADDING_BOTTOM},right=${REGION_PADDING_SIDE}]`,
+      },
+    });
+  }
+  return result;
+}
+
+/**
+ * Walks ELK's nested result, returning every component node with its
+ * coordinates made absolute (ELK reports children relative to their parent)
+ * plus the absolute box of each region.
+ */
+function flattenResult(
+  children: ElkNode[] | undefined,
+  offsetX = 0,
+  offsetY = 0,
+  out: { components: ElkNode[]; regions: Map<string, { x: number; y: number; width: number; height: number; ports: ElkPort[] }> } = {
+    components: [],
+    regions: new Map(),
+  },
+) {
+  for (const node of children ?? []) {
+    const x = (node.x ?? 0) + offsetX;
+    const y = (node.y ?? 0) + offsetY;
+    if (node.id.startsWith(REGION_ID_PREFIX)) {
+      out.regions.set(node.id.slice(REGION_ID_PREFIX.length), {
+        x,
+        y,
+        width: node.width ?? 0,
+        height: node.height ?? 0,
+        ports: node.ports ?? [],
+      });
+      flattenResult(node.children, x, y, out);
+    } else {
+      out.components.push({ ...node, x, y });
+    }
+  }
+  return out;
+}
+
+/**
  * Cheap first pass with no ports: edges connect node-to-node directly, so
  * elk only needs to decide each component's column, not route anything. We
  * use the resulting x-centers to decide, per pin, whether the component it
  * connects to sits to the left or right - that's what determines which side
  * of the box the pin (and its wire) should exit from.
  */
-async function estimateComponentCenters(diagram: Diagram): Promise<Map<string, number>> {
+async function estimateComponentCenters(
+  diagram: Diagram,
+): Promise<{ centers: Map<string, number>; regionCenters: Map<string, number> }> {
   const elk = new ELK();
   const ephemeral = collectEphemeralDefinitions(diagram).definitions;
 
@@ -137,16 +245,50 @@ async function estimateComponentCenters(diagram: Diagram): Promise<Map<string, n
   const graph: ElkNode = {
     id: "root",
     layoutOptions: { "elk.algorithm": "layered", "elk.direction": "RIGHT" },
-    children: nodes,
+    children: groupByRegion(diagram, nodes),
     edges,
   };
+  graph.layoutOptions = { ...graph.layoutOptions, "elk.hierarchyHandling": "INCLUDE_CHILDREN" };
 
   const result = await elk.layout(graph);
+  const flat = flattenResult(result.children);
   const centers = new Map<string, number>();
-  for (const node of result.children ?? []) {
+  for (const node of flat.components) {
     centers.set(node.id, (node.x ?? 0) + (node.width ?? 0) / 2);
   }
-  return centers;
+  const regionCenters = new Map<string, number>();
+  for (const [id, box] of flat.regions) regionCenters.set(id, box.x + box.width / 2);
+  return { centers, regionCenters };
+}
+
+/** What the preliminary pass learned about where components and regions sit horizontally. */
+interface PlacementContext {
+  centers: Map<string, number>;
+  regionCenters: Map<string, number>;
+  /** Region each component sits in (only regions that actually exist). */
+  regionOf: Map<string, string | undefined>;
+}
+
+/**
+ * x positions to compare when deciding which way a wire between two
+ * components heads. A wire crossing a region's border really leaves from the
+ * region's gate, so for a component inside a region the comparison uses the
+ * region's center rather than the component's own - that keeps a pin's side
+ * consistent with the side of the gate its wire exits through.
+ */
+function anchorsFor(
+  ctx: PlacementContext,
+  componentId: string,
+  otherId: string,
+): { own: number; other: number } | undefined {
+  const ownRegion = ctx.regionOf.get(componentId);
+  const otherRegion = ctx.regionOf.get(otherId);
+  const crossing = ownRegion !== otherRegion;
+  const anchor = (id: string, region: string | undefined) =>
+    crossing && region !== undefined ? ctx.regionCenters.get(region) : ctx.centers.get(id);
+  const own = anchor(componentId, ownRegion);
+  const other = anchor(otherId, otherRegion);
+  return own === undefined || other === undefined ? undefined : { own, other };
 }
 
 /**
@@ -160,10 +302,9 @@ function choosePinSide(
   componentId: string,
   pinName: string,
   diagram: Diagram,
-  centers: Map<string, number>,
+  ctx: PlacementContext,
   fallbackIndex: number,
 ): PinSide {
-  const ownCenter = centers.get(componentId) ?? 0;
   let westVotes = 0;
   let eastVotes = 0;
 
@@ -176,10 +317,10 @@ function choosePinSide(
     }
     if (!otherComponent || otherComponent === componentId) continue;
 
-    const otherCenter = centers.get(otherComponent);
-    if (otherCenter === undefined) continue;
-    if (otherCenter < ownCenter) westVotes++;
-    else if (otherCenter > ownCenter) eastVotes++;
+    const anchors = anchorsFor(ctx, componentId, otherComponent);
+    if (!anchors) continue;
+    if (anchors.other < anchors.own) westVotes++;
+    else if (anchors.other > anchors.own) eastVotes++;
   }
 
   if (westVotes > eastVotes) return "WEST";
@@ -238,7 +379,15 @@ function enforceHorizontalPinExits(
  * potentially looping around the box.
  */
 export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
-  const centers = await estimateComponentCenters(diagram);
+  const { centers, regionCenters } = await estimateComponentCenters(diagram);
+  const knownRegions = new Set((diagram.regions ?? []).map((region) => region.id));
+  const regionOf = new Map(
+    diagram.components.map((component) => [
+      component.id,
+      component.region !== undefined && knownRegions.has(component.region) ? component.region : undefined,
+    ]),
+  );
+  const ctx: PlacementContext = { centers, regionCenters, regionOf };
   const elk = new ELK();
   const ephemeral = collectEphemeralDefinitions(diagram).definitions;
 
@@ -261,7 +410,7 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
 
     const sides = new Map<string, PinSide>();
     definition.pins.forEach((pin, index) => {
-      sides.set(pin.name, choosePinSide(component.id, pin.name, diagram, centers, index));
+      sides.set(pin.name, choosePinSide(component.id, pin.name, diagram, ctx, index));
     });
 
     definition.pins.forEach((pin) => {
@@ -311,13 +460,71 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     };
   });
 
+  // Every wire that crosses a region's border is split into hops that run
+  // through that region's gates (one WEST "input" and one EAST "output" port
+  // per region, created only when used): external pin -> gate -> internal pin.
+  // Hops are routed as separate ELK edges and stitched back into a single
+  // wire below, so the region border is only ever crossed at its gates.
+  type Waypoint = { kind: "pin"; id: string; component: string } | { kind: "gate"; id: string; region: string };
+  interface Hop {
+    id: string;
+    from: Waypoint;
+    to: Waypoint;
+    /** Region whose coordinate space ELK reports this hop's points in; undefined = root. */
+    container?: string;
+  }
+  // One gate per pin (and side) that has wires crossing the region border:
+  // wires from the same pin - e.g. every consumer of a charger's OUT+ - share
+  // that pin's gate, while wires from different pins keep separate ones.
+  const gateMeta = new Map<string, { region: string; side: PinSide }>();
+  const hopsByConnection = new Map<string, Hop[]>();
   const connectionById = new Map(diagram.connections.map((connection, index) => [connectionId(connection, index), connection]));
 
-  const elkEdges: ElkExtendedEdge[] = diagram.connections.map((connection, index) => ({
-    id: connectionId(connection, index),
-    sources: [pinId(connection.from.component, connection.from.pin)],
-    targets: [pinId(connection.to.component, connection.to.pin)],
-  }));
+  diagram.connections.forEach((connection, index) => {
+    const id = connectionId(connection, index);
+    const fromComp = connection.from.component;
+    const toComp = connection.to.component;
+    const fromRegion = regionOf.get(fromComp);
+    const toRegion = regionOf.get(toComp);
+
+    const pin = (ref: PinRef): Waypoint => ({ kind: "pin", id: pinId(ref.component, ref.pin), component: ref.component });
+    const gateFor = (region: string, own: string, ownPin: string, other: string): Waypoint => {
+      const anchors = anchorsFor(ctx, own, other);
+      const side: PinSide = anchors && anchors.other < anchors.own ? "WEST" : "EAST";
+      const gate = `gate::${region}::${own}::${ownPin}::${side}`;
+      gateMeta.set(gate, { region, side });
+      return { kind: "gate", id: gate, region };
+    };
+
+    const path: Waypoint[] = [pin(connection.from)];
+    if (fromRegion !== undefined && fromRegion !== toRegion) path.push(gateFor(fromRegion, fromComp, connection.from.pin, toComp));
+    if (toRegion !== undefined && fromRegion !== toRegion) path.push(gateFor(toRegion, toComp, connection.to.pin, fromComp));
+    path.push(pin(connection.to));
+
+    const hops: Hop[] = [];
+    for (let k = 0; k < path.length - 1; k++) {
+      const a = path[k];
+      const b = path[k + 1];
+      // A hop lives inside a region when both ends are in it: two of its
+      // components, or one of its components and one of its gates.
+      const regionIn = (w: Waypoint) => (w.kind === "gate" ? w.region : regionOf.get(w.component));
+      const container = regionIn(a) !== undefined && regionIn(a) === regionIn(b) ? regionIn(a) : undefined;
+      hops.push({ id: path.length === 2 ? id : `${id}#${k}`, from: a, to: b, container });
+    }
+    hopsByConnection.set(id, hops);
+  });
+
+  const gatePorts = new Map<string, ElkPort[]>();
+  for (const [id, { region, side }] of gateMeta) {
+    gatePorts.set(region, [
+      ...(gatePorts.get(region) ?? []),
+      { id, width: 1, height: 1, layoutOptions: { "elk.port.side": side } },
+    ]);
+  }
+
+  const elkEdges: ElkExtendedEdge[] = [...hopsByConnection.values()].flatMap((hops) =>
+    hops.map((hop) => ({ id: hop.id, sources: [hop.from.id], targets: [hop.to.id] })),
+  );
 
   const graph: ElkNode = {
     id: "root",
@@ -329,14 +536,19 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
       "elk.layered.spacing.nodeNodeBetweenLayers": "120",
       "elk.spacing.edgeEdge": "12",
       "elk.spacing.edgeNode": "20",
+      // Lets wires cross region boundaries and be routed together with the
+      // rest of the graph instead of each region being laid out in isolation.
+      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
     },
-    children: elkNodes,
+    children: groupByRegion(diagram, elkNodes, gatePorts),
     edges: elkEdges,
   };
 
   const result = await elk.layout(graph);
 
-  const nodes: LayoutNode[] = (result.children ?? []).map((node) => {
+  const flat = flattenResult(result.children);
+
+  const nodes: LayoutNode[] = flat.components.map((node) => {
     const component = diagram.components.find((c) => c.id === node.id);
     if (!component) {
       throw new Error(`Layout produced an unexpected node id "${node.id}"`);
@@ -378,33 +590,61 @@ export async function layoutDiagram(diagram: Diagram): Promise<DiagramLayout> {
     };
   });
 
-  const edges: LayoutEdge[] = (result.edges ?? []).map((edge) => {
+  const routedById = new Map((result.edges ?? []).map((edge) => [edge.id, edge]));
+
+  const edges: LayoutEdge[] = [...hopsByConnection].map(([id, hops]) => {
+    const connection = connectionById.get(id)!;
     const points: { x: number; y: number }[] = [];
-    for (const section of edge.sections ?? []) {
-      points.push(section.startPoint, ...(section.bendPoints ?? []), section.endPoint);
-    }
-    const id = edge.id ?? "edge";
-    const connection = connectionById.get(id);
-    if (!connection) {
-      throw new Error(`Layout produced an unexpected edge id "${id}"`);
+    for (const hop of hops) {
+      const routed = routedById.get(hop.id);
+      if (!routed) {
+        throw new Error(`Layout produced no route for edge "${hop.id}"`);
+      }
+      // ELK reports a hop's points relative to its containing region (or the
+      // root), so shift them into absolute coordinates.
+      const container = hop.container === undefined ? undefined : flat.regions.get(hop.container);
+      const offsetX = container?.x ?? 0;
+      const offsetY = container?.y ?? 0;
+      for (const section of routed.sections ?? []) {
+        for (const point of [section.startPoint, ...(section.bendPoints ?? []), section.endPoint]) {
+          const absolute = { x: point.x + offsetX, y: point.y + offsetY };
+          // Consecutive hops meet at a gate - keep that shared point once.
+          const last = points[points.length - 1];
+          if (last && Math.abs(last.x - absolute.x) < 1 && Math.abs(last.y - absolute.y) < 1) continue;
+          points.push(absolute);
+        }
+      }
     }
     const fromPinId = pinId(connection.from.component, connection.from.pin);
     const toPinId = pinId(connection.to.component, connection.to.pin);
-    const fromSide = pinSides.get(fromPinId) ?? "EAST";
-    const toSide = pinSides.get(toPinId) ?? "EAST";
-    const fromLane = pinLanes.get(fromPinId) ?? 0;
-    const toLane = pinLanes.get(toPinId) ?? 0;
     return {
       id,
-      points: enforceHorizontalPinExits(points, fromSide, fromLane, toSide, toLane),
+      points: enforceHorizontalPinExits(
+        points,
+        pinSides.get(fromPinId) ?? "EAST",
+        pinLanes.get(fromPinId) ?? 0,
+        pinSides.get(toPinId) ?? "EAST",
+        pinLanes.get(toPinId) ?? 0,
+      ),
       from: connection.from,
       to: connection.to,
     };
   });
 
+  const regions: LayoutRegion[] = (diagram.regions ?? []).flatMap((region) => {
+    const box = flat.regions.get(region.id);
+    if (!box) return [];
+    const gates: LayoutGate[] = box.ports.map((port) => {
+      const side: PinSide = gateMeta.get(port.id)?.side ?? "EAST";
+      return { side, x: box.x + (port.x ?? 0), y: box.y + (port.y ?? 0) };
+    });
+    return [{ id: region.id, label: region.label, kind: region.kind ?? "physical", gates, x: box.x, y: box.y, width: box.width, height: box.height }];
+  });
+
   return {
     width: result.width ?? MIN_NODE_WIDTH,
     height: result.height ?? MIN_NODE_HEIGHT,
+    regions,
     nodes,
     edges,
   };
