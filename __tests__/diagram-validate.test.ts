@@ -12,7 +12,7 @@ const baseDiagram = {
 describe("validateDiagram", () => {
   test("accepts a well-formed diagram", () => {
     const result = validateDiagram(baseDiagram);
-    expect(result).toEqual({ valid: true, errors: [] });
+    expect(result).toEqual({ valid: true, errors: [], warnings: [] });
   });
 
   test("rejects a diagram that fails the JSON Schema (missing required field)", () => {
@@ -79,7 +79,7 @@ describe("validateDiagram", () => {
       ],
       connections: [{ from: { component: "x1", pin: "SDA" }, to: { component: "mcu-1", pin: "D4" } }],
     });
-    expect(result).toEqual({ valid: true, errors: [] });
+    expect(result).toEqual({ valid: true, errors: [], warnings: [] });
   });
 
   test("rejects an inline definition with duplicate pin names", () => {
@@ -171,6 +171,6 @@ describe("validateDiagram", () => {
         { from: { component: "sensor-2", pin: "GND" }, to: { component: "mcu-1", pin: "GND" } },
       ],
     });
-    expect(result).toEqual({ valid: true, errors: [] });
+    expect(result).toEqual({ valid: true, errors: [], warnings: [] });
   });
 });

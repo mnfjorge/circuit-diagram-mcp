@@ -2,21 +2,21 @@
   "type": "xiao_esp32c3",
   "label": "Seeed XIAO ESP32-C3",
   "category": "microcontroller",
-  "description": "Seeed Studio XIAO ESP32-C3, standard 14-pin XIAO castellated layout (7 pins per side). Pin names follow the silkscreen D0-D10 labels; GPIO/peripheral mapping is noted per pin.",
+  "description": "Seeed Studio XIAO ESP32-C3, standard 14-pin XIAO castellated layout (7 pins per side). Left (D0-D6, top to bottom with USB-C up): D0-D6; right: 5V, GND, 3V3, D10, D9, D8, D7. Pin names follow the silkscreen D0-D10 labels; GPIO/peripheral mapping is noted per pin.",
   "pins": [
-    { "name": "5V", "label": "5V USB power input/output", "group": "left" },
-    { "name": "GND", "label": "Ground", "group": "left" },
-    { "name": "3V3", "label": "3.3V power output", "group": "left" },
     { "name": "D0", "label": "GPIO2 / A0", "group": "left" },
     { "name": "D1", "label": "GPIO3 / A1", "group": "left" },
     { "name": "D2", "label": "GPIO4 / A2", "group": "left" },
     { "name": "D3", "label": "GPIO5 / A3", "group": "left" },
-    { "name": "D4", "label": "GPIO6 / I2C SDA", "group": "right" },
-    { "name": "D5", "label": "GPIO7 / I2C SCL", "group": "right" },
-    { "name": "D6", "label": "GPIO21 / UART TX", "group": "right" },
-    { "name": "D7", "label": "GPIO20 / UART RX", "group": "right" },
-    { "name": "D8", "label": "GPIO8 / SPI SCK", "group": "right" },
+    { "name": "D4", "label": "GPIO6 / I2C SDA", "group": "left" },
+    { "name": "D5", "label": "GPIO7 / I2C SCL", "group": "left" },
+    { "name": "D6", "label": "GPIO21 / UART TX", "group": "left" },
+    { "name": "5V", "label": "5V USB power input/output", "group": "right" },
+    { "name": "GND", "label": "Ground", "group": "right" },
+    { "name": "3V3", "label": "3.3V power output", "group": "right" },
+    { "name": "D10", "label": "GPIO10 / SPI MOSI", "group": "right" },
     { "name": "D9", "label": "GPIO9 / SPI MISO", "group": "right" },
-    { "name": "D10", "label": "GPIO10 / SPI MOSI", "group": "right" }
+    { "name": "D8", "label": "GPIO8 / SPI SCK", "group": "right" },
+    { "name": "D7", "label": "GPIO20 / UART RX", "group": "right" }
   ]
 }

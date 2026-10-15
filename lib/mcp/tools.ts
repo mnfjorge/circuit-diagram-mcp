@@ -1,6 +1,6 @@
 import { listComponentDefinitions } from "../components/registry";
 import { renderDiagramToJpeg } from "../diagram/render";
-import { getDiagram, saveDiagram, saveDiagramImage } from "../diagram/store";
+import { deleteDiagram as removeDiagram, deleteDiagramImage, getDiagram, saveDiagram, saveDiagramImage } from "../diagram/store";
 import type { Diagram, DiagramComponent, DiagramConnection, DiagramRegion } from "../diagram/types";
 import { validateDiagram } from "../diagram/validate";
 import { getBaseUrl } from "../site-url";
@@ -14,7 +14,7 @@ export interface DiagramInput {
 }
 
 export type ToolResult =
-  | { ok: true; diagram: Diagram }
+  | { ok: true; diagram: Diagram; warnings: string[] }
   | { ok: false; errors: string[] };
 
 function toDiagram(input: DiagramInput): Diagram {
@@ -44,7 +44,7 @@ export async function createDiagram(input: DiagramInput): Promise<ToolResult> {
   }
 
   await saveDiagram(diagram);
-  return { ok: true, diagram };
+  return { ok: true, diagram, warnings: validation.warnings };
 }
 
 /** Replaces an existing diagram's contents. Fails if diagramId doesn't exist. */
@@ -64,7 +64,10 @@ export async function updateDiagram(input: DiagramInput): Promise<ToolResult> {
   }
 
   await saveDiagram(diagram);
-  return { ok: true, diagram };
+  // The cached render belongs to the previous contents; drop it so a view page or image
+  // request made before the next render_diagram can't serve it.
+  await deleteDiagramImage(diagram.id);
+  return { ok: true, diagram, warnings: validation.warnings };
 }
 
 export type RenderResult =
@@ -93,4 +96,23 @@ export async function renderDiagram(diagramId: string): Promise<RenderResult> {
 /** Lists every placeable component type and its pins, for the LLM to discover what it can use. */
 export function listComponentTypes() {
   return listComponentDefinitions();
+}
+
+export type GetResult = { ok: true; diagram: Diagram } | { ok: false; errors: string[] };
+
+/** Returns the stored diagram exactly as saved (regions, components, connections). */
+export async function getStoredDiagram(diagramId: string): Promise<GetResult> {
+  const diagram = await getDiagram(diagramId);
+  if (!diagram) {
+    return { ok: false, errors: [`No diagram with id "${diagramId}" exists.`] };
+  }
+  return { ok: true, diagram };
+}
+
+export type DeleteResult = { ok: true } | { ok: false; errors: string[] };
+
+/** Permanently deletes a diagram and its rendered image. */
+export async function deleteStoredDiagram(diagramId: string): Promise<DeleteResult> {
+  const deleted = await removeDiagram(diagramId);
+  return deleted ? { ok: true } : { ok: false, errors: [`No diagram with id "${diagramId}" exists.`] };
 }

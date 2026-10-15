@@ -24,6 +24,8 @@ const validateSchema = ajv.compile(diagramSchema);
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
+  /** Things that don't invalidate the diagram but probably aren't what the author meant. */
+  warnings: string[];
 }
 
 /**
@@ -36,11 +38,12 @@ export interface ValidationResult {
 export function validateDiagram(data: unknown): ValidationResult {
   if (!validateSchema(data)) {
     const errors = (validateSchema.errors ?? []).map((err) => `${err.instancePath || "(root)"} ${err.message}`);
-    return { valid: false, errors };
+    return { valid: false, errors, warnings: [] };
   }
 
   const diagram = data as Diagram;
   const errors: string[] = [];
+  const warnings: string[] = [];
   const componentIds = new Set<string>();
   const regionIds = new Set<string>();
 
@@ -95,5 +98,14 @@ export function validateDiagram(data: unknown): ValidationResult {
     }
   }
 
-  return { valid: errors.length === 0, errors };
+  const usedRegions = new Set(diagram.components.map((component) => component.region));
+  for (const region of diagram.regions ?? []) {
+    if (!usedRegions.has(region.id)) {
+      warnings.push(
+        `Region "${region.id}" has no components, so it won't be drawn. Assign components to it with their "region" field.`,
+      );
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
 }

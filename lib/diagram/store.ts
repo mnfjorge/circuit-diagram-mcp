@@ -1,4 +1,4 @@
-import { downloadFile, uploadFile, type StoredFile } from "../file-storage";
+import { deleteFile, downloadFile, uploadFile, type StoredFile } from "../file-storage";
 import type { Diagram } from "./types";
 
 function diagramPath(id: string): string {
@@ -40,4 +40,18 @@ export async function getDiagramImage(id: string): Promise<Buffer | null> {
   } catch {
     return null;
   }
+}
+
+/** Drops the cached render so the next request re-renders from the stored diagram. No-op if there isn't one. */
+export async function deleteDiagramImage(id: string): Promise<void> {
+  await deleteFile(diagramImagePath(id)).catch(() => {});
+}
+
+/** Deletes a diagram and its cached render. Returns false if no such diagram existed. */
+export async function deleteDiagram(id: string): Promise<boolean> {
+  const existing = await getDiagram(id);
+  if (!existing) return false;
+  await deleteFile(diagramPath(id));
+  await deleteDiagramImage(id);
+  return true;
 }
