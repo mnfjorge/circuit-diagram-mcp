@@ -51,6 +51,7 @@ export interface InteractiveDiagramProps {
 
 export function InteractiveDiagram({ diagram, layout, componentDefinitions }: InteractiveDiagramProps) {
   const [hover, setHover] = useState<HoverInfo | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
 
   const handleMouseMove = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
@@ -96,6 +97,21 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
     [diagram, componentDefinitions],
   );
 
+  const handleClickComponent = useCallback((componentId: string) => {
+    setFocusedId((current) => (current === componentId ? null : componentId));
+  }, []);
+
+  // When a component is focused, only it and the components wired directly to it stay visible.
+  const visibleIds = useMemo(() => {
+    if (!focusedId) return null;
+    const ids = new Set<string>([focusedId]);
+    for (const edge of layout.edges) {
+      if (edge.from.component === focusedId) ids.add(edge.to.component);
+      if (edge.to.component === focusedId) ids.add(edge.from.component);
+    }
+    return ids;
+  }, [focusedId, layout.edges]);
+
   const nodes = useMemo<ComponentNodeType[]>(
     () =>
       layout.nodes.map((layoutNode) => {
@@ -107,7 +123,10 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
           position: { x: layoutNode.x, y: layoutNode.y },
           selectable: false,
           draggable: false,
+          hidden: visibleIds ? !visibleIds.has(layoutNode.componentId) : false,
           data: {
+            focused: focusedId === layoutNode.componentId,
+            onClickComponent: handleClickComponent,
             layoutNode,
             definition,
             onHoverComponent: handleHoverComponent,
@@ -116,7 +135,17 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
           },
         };
       }),
-    [diagram.components, layout.nodes, componentDefinitions, handleHoverComponent, handleHoverPin, handleLeave],
+    [
+      diagram.components,
+      layout.nodes,
+      componentDefinitions,
+      visibleIds,
+      focusedId,
+      handleClickComponent,
+      handleHoverComponent,
+      handleHoverPin,
+      handleLeave,
+    ],
   );
 
   return (
@@ -139,6 +168,7 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
         // wrapper `pointer-events: none` by default - this is otherwise the only
         // hook available to opt back in, letting our node/pin hover handlers fire.
         onNodeMouseEnter={() => {}}
+        onPaneClick={() => setFocusedId(null)}
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} />
@@ -168,6 +198,7 @@ export function InteractiveDiagram({ diagram, layout, componentDefinitions }: In
           })}
           <svg style={{ position: "absolute", left: 0, top: 0, overflow: "visible" }}>
             {layout.edges.map((edge) => {
+              if (focusedId && edge.from.component !== focusedId && edge.to.component !== focusedId) return null;
               const { kind, color } = classifyWire(edge);
               // The static JPEG renderer's near-black ground color is only ever drawn on a
               // fixed white background; here the canvas can be dark, so ground wires use a

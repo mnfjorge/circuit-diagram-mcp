@@ -10,6 +10,9 @@ export interface ComponentNodeData extends Record<string, unknown> {
   onHoverComponent: (node: LayoutNode, definition?: ComponentDefinition) => void;
   onHoverPin: (node: LayoutNode, pin: LayoutPin, definition?: ComponentDefinition) => void;
   onLeave: () => void;
+  onClickComponent: (componentId: string) => void;
+  /** True when this component is the one currently focused by a click. */
+  focused?: boolean;
 }
 
 export type ComponentNodeType = Node<ComponentNodeData, "component">;
@@ -21,12 +24,15 @@ const PIN_LABEL_GAP = 6;
 const PIN_LABEL_RAISE = 9;
 
 export function ComponentNode({ data }: NodeProps<ComponentNodeType>) {
-  const { layoutNode, definition, onHoverComponent, onHoverPin, onLeave } = data;
+  const { layoutNode, definition, onHoverComponent, onHoverPin, onLeave, onClickComponent, focused } = data;
 
   return (
     <div
-      className="relative overflow-visible rounded-lg border-2 border-zinc-800 bg-white shadow-sm dark:border-zinc-200 dark:bg-zinc-900"
+      className={`relative cursor-pointer overflow-visible rounded-lg border-2 bg-white shadow-sm dark:bg-zinc-900 ${
+        focused ? "border-blue-500 ring-2 ring-blue-500" : "border-zinc-800 dark:border-zinc-200"
+      }`}
       style={{ width: layoutNode.width, height: layoutNode.height }}
+      onClick={() => onClickComponent(layoutNode.componentId)}
       onMouseEnter={() => onHoverComponent(layoutNode, definition)}
       onMouseLeave={onLeave}
     >
